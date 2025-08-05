@@ -1,0 +1,9 @@
+dependencies:
+- name: adot-collector
+  repository: ""
+  version: 1.0.0
+- name: mongodb-exporter
+  repository: file://./charts/mongodb-exporter
+  version: 1.0.0
+digest: sha256:bb33cb54ced2bfbc92bf683740340e85202852daf0e6d59549e5eca848211a82
+generated: "2025-08-06T06:35:00.888415+09:00"

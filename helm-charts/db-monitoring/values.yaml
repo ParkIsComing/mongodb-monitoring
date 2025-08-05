@@ -1,0 +1,127 @@
+# Production 환경 설정 - 동적 값 사용
+global:
+  namespace: observability
+  region: "{{ .Values.aws.region | default \"us-east-1\" }}"
+  clusterName: "{{ .Values.aws.clusterName | default \"\" }}"
+  accountId: "{{ .Values.aws.accountId | default \"\" }}"
+  rbac:
+    create: true
+
+# AWS 환경별 설정 (외부에서 주입)
+aws:
+  region: ""           # 배포 시 지정: --set aws.region=ap-northeast-2
+  accountId: ""        # 배포 시 지정: --set aws.accountId=123456789012
+  clusterName: ""      # 배포 시 지정: --set aws.clusterName=my-cluster
+
+# Amazon Managed Prometheus configuration
+amp:
+  workspaceId: ""  # 배포 시 --set으로 설정
+  endpoint: ""     # 배포 시 --set으로 설정
+  region: ""       # 배포 시 --set으로 설정
+
+# ADOT Collector configuration
+adot-collector:
+  serviceAccount:
+    create: true
+    name: adot-collector
+    annotations:
+      eks.amazonaws.com/role-arn: ""  # 배포 시 --set으로 설정
+  
+  resources:
+    requests:
+      cpu: 250m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  
+  config:
+    scrapeInterval: 30s
+    scrapeTimeout: 10s
+    logLevel: info
+  
+  amp:
+    endpoint: ""  # 배포 시 --set으로 설정
+    region: ""    # 배포 시 --set으로 설정
+
+# ADOT 활성화 플래그
+adot:
+  enabled: true
+
+# Database configurations
+databases:
+  mongodb:
+    enabled: "{{ .Values.databases.mongodb.enabled | default true }}"
+    instances:
+      - name: "{{ .Values.databases.mongodb.instances[0].name | default \"test-mongodb\" }}"
+        host: "{{ .Values.databases.mongodb.instances[0].host | default \"test-mongodb\" }}"
+        port: "{{ .Values.databases.mongodb.instances[0].port | default 27017 }}"
+        database: "{{ .Values.databases.mongodb.instances[0].database | default \"admin\" }}"
+        username: "{{ .Values.databases.mongodb.instances[0].username | default \"test\" }}"
+        password: "{{ .Values.databases.mongodb.instances[0].password | default \"test\" }}"
+
+# MongoDB Exporter configuration
+mongodb:
+  enabled: "{{ .Values.databases.mongodb.enabled | default true }}"
+
+mongodb-exporter:
+  namespace: "{{ .Values.global.namespace | default \"observability\" }}"
+  
+  mongodb:
+    uri: "mongodb://{{ .Values.databases.mongodb.instances[0].username | default \"test\" }}:{{ .Values.databases.mongodb.instances[0].password | default \"test\" }}@{{ .Values.databases.mongodb.instances[0].host | default \"test-mongodb\" }}.{{ .Values.global.namespace | default \"observability\" }}.svc.cluster.local:{{ .Values.databases.mongodb.instances[0].port | default 27017 }}/{{ .Values.databases.mongodb.instances[0].database | default \"admin\" }}"
+    username: "{{ .Values.databases.mongodb.instances[0].username | default \"test\" }}"
+    password: "{{ .Values.databases.mongodb.instances[0].password | default \"test\" }}"
+    authDatabase: "{{ .Values.databases.mongodb.instances[0].database | default \"admin\" }}"
+  
+  image:
+    repository: percona/mongodb_exporter
+    tag: "0.40.0"
+    pullPolicy: IfNotPresent
+  
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  
+  service:
+    type: ClusterIP
+    port: 9216
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9216"
+      prometheus.io/path: "/metrics"
+  
+  exporter:
+    collectAll: true
+    collectDatabase: true
+    collectCollection: true
+    collectTopMetrics: true
+    collectIndexUsage: true
+    collectConnPoolStats: true
+    logLevel: "info"
+
+# Monitoring and observability settings
+monitoring:
+  serviceMonitor:
+    enabled: false
+    namespace: "{{ .Values.global.namespace | default \"observability\" }}"
+    interval: 30s
+    scrapeTimeout: 10s
+  
+  prometheusRule:
+    enabled: false
+    namespace: "{{ .Values.global.namespace | default \"observability\" }}"
+
+# Security settings
+security:
+  podSecurityPolicy:
+    enabled: false
+  
+  networkPolicy:
+    enabled: false
+  
+  rbac:
+    create: true

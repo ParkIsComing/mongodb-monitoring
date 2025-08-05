@@ -1,0 +1,279 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mongodb-sharded-users
+  namespace: percona-mongodb
+type: Opaque
+stringData:
+  # 데이터베이스 관리자 (SCRAM-SHA-1 + X.509)
+  MONGODB_DATABASE_ADMIN_USER: "databaseAdmin"
+  MONGODB_DATABASE_ADMIN_PASSWORD: "$(openssl rand -base64 32 | tr -d '\n')"
+  
+  # 클러스터 관리자 (SCRAM-SHA-1 + X.509)
+  MONGODB_CLUSTER_ADMIN_USER: "clusterAdmin"
+  MONGODB_CLUSTER_ADMIN_PASSWORD: "$(openssl rand -base64 32 | tr -d '\n')"
+  
+  # 백업 사용자 (SCRAM-SHA-1)
+  MONGODB_BACKUP_USER: "backupUser"
+  MONGODB_BACKUP_PASSWORD: "$(openssl rand -base64 32 | tr -d '\n')"
+  
+  # 모니터링 사용자 (SCRAM-SHA-1 + X.509)
+  MONGODB_CLUSTER_MONITOR_USER: "clusterMonitor"
+  MONGODB_CLUSTER_MONITOR_PASSWORD: "$(openssl rand -base64 32 | tr -d '\n')"
+  
+  # 애플리케이션 사용자 (SCRAM-SHA-1 + X.509)
+  MONGODB_APPLICATION_USER: "appUser"
+  MONGODB_APPLICATION_PASSWORD: "$(openssl rand -base64 32 | tr -d '\n')"
+  
+  # 읽기 전용 사용자 (SCRAM-SHA-1)
+  MONGODB_READONLY_USER: "readOnlyUser"
+  MONGODB_READONLY_PASSWORD: "$(openssl rand -base64 32 | tr -d '\n')"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mongodb-user-setup
+  namespace: percona-mongodb
+data:
+  setup-users.js: |
+    // MongoDB 사용자 설정 스크립트
+    // AWS Security 권장사항에 따른 인증 설정
+    
+    // admin 데이터베이스로 전환
+    use admin;
+    
+    // 1. 데이터베이스 관리자 생성 (SCRAM-SHA-1 + X.509)
+    db.createUser({
+      user: "databaseAdmin",
+      pwd: process.env.MONGODB_DATABASE_ADMIN_PASSWORD,
+      roles: [
+        { role: "dbAdminAnyDatabase", db: "admin" },
+        { role: "readWriteAnyDatabase", db: "admin" },
+        { role: "userAdminAnyDatabase", db: "admin" }
+      ],
+      mechanisms: ["SCRAM-SHA-1", "SCRAM-SHA-256"]
+    });
+    
+    // 2. 클러스터 관리자 생성 (SCRAM-SHA-1 + X.509)
+    db.createUser({
+      user: "clusterAdmin",
+      pwd: process.env.MONGODB_CLUSTER_ADMIN_PASSWORD,
+      roles: [
+        { role: "clusterAdmin", db: "admin" },
+        { role: "dbAdminAnyDatabase", db: "admin" },
+        { role: "userAdminAnyDatabase", db: "admin" },
+        { role: "readWriteAnyDatabase", db: "admin" }
+      ],
+      mechanisms: ["SCRAM-SHA-1", "SCRAM-SHA-256"]
+    });
+    
+    // 3. 백업 사용자 생성 (SCRAM-SHA-1)
+    db.createUser({
+      user: "backupUser",
+      pwd: process.env.MONGODB_BACKUP_PASSWORD,
+      roles: [
+        { role: "backup", db: "admin" },
+        { role: "restore", db: "admin" },
+        { role: "clusterMonitor", db: "admin" }
+      ],
+      mechanisms: ["SCRAM-SHA-1"]
+    });
+    
+    // 4. 모니터링 사용자 생성 (SCRAM-SHA-1 + X.509)
+    db.createUser({
+      user: "clusterMonitor",
+      pwd: process.env.MONGODB_CLUSTER_MONITOR_PASSWORD,
+      roles: [
+        { role: "clusterMonitor", db: "admin" },
+        { role: "read", db: "local" }
+      ],
+      mechanisms: ["SCRAM-SHA-1", "SCRAM-SHA-256"]
+    });
+    
+    // 5. 애플리케이션 사용자 생성 (SCRAM-SHA-1 + X.509)
+    db.createUser({
+      user: "appUser",
+      pwd: process.env.MONGODB_APPLICATION_PASSWORD,
+      roles: [
+        { role: "readWrite", db: "myapp" },
+        { role: "read", db: "analytics" }
+      ],
+      mechanisms: ["SCRAM-SHA-1", "SCRAM-SHA-256"]
+    });
+    
+    // 6. 읽기 전용 사용자 생성 (SCRAM-SHA-1)
+    db.createUser({
+      user: "readOnlyUser",
+      pwd: process.env.MONGODB_READONLY_PASSWORD,
+      roles: [
+        { role: "readAnyDatabase", db: "admin" }
+      ],
+      mechanisms: ["SCRAM-SHA-1"]
+    });
+    
+    // 7. X.509 인증서 기반 사용자 생성
+    // 관리자 X.509 사용자 (CN=admin)
+    db.getSiblingDB("$external").createUser({
+      user: "CN=admin,OU=Database,O=MongoDB-Cluster,L=Seoul,ST=Seoul,C=KR",
+      roles: [
+        { role: "clusterAdmin", db: "admin" },
+        { role: "dbAdminAnyDatabase", db: "admin" },
+        { role: "userAdminAnyDatabase", db: "admin" },
+        { role: "readWriteAnyDatabase", db: "admin" }
+      ]
+    });
+    
+    // 애플리케이션 X.509 사용자 (CN=mongodb-app-user)
+    db.getSiblingDB("$external").createUser({
+      user: "CN=mongodb-app-user,OU=Application,O=MongoDB-Cluster,L=Seoul,ST=Seoul,C=KR",
+      roles: [
+        { role: "readWrite", db: "myapp" },
+        { role: "read", db: "analytics" }
+      ]
+    });
+    
+    // 모니터링 X.509 사용자 (CN=mongodb-monitor)
+    db.getSiblingDB("$external").createUser({
+      user: "CN=mongodb-monitor,OU=Monitoring,O=MongoDB-Cluster,L=Seoul,ST=Seoul,C=KR",
+      roles: [
+        { role: "clusterMonitor", db: "admin" },
+        { role: "read", db: "local" }
+      ]
+    });
+    
+    print("✅ 모든 사용자 생성 완료");
+    
+    // 8. 인증 설정 확인
+    print("📋 생성된 사용자 목록:");
+    db.getUsers().forEach(function(user) {
+      print("  - " + user.user + " (" + user.roles.map(r => r.role).join(", ") + ")");
+    });
+    
+    print("📋 X.509 사용자 목록:");
+    db.getSiblingDB("$external").getUsers().forEach(function(user) {
+      print("  - " + user.user);
+    });
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mongodb-user-setup
+  namespace: percona-mongodb
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: mongodb-setup
+        image: percona/percona-server-mongodb:6.0.9-7
+        command: ["/bin/bash"]
+        args:
+        - -c
+        - |
+          # MongoDB 클러스터가 준비될 때까지 대기
+          echo "MongoDB 클러스터 준비 대기 중..."
+          until mongosh --host mongodb-sharded-mongos.percona-mongodb.svc.cluster.local:27017 \
+                        --tls \
+                        --tlsCAFile /etc/mongodb-ssl/ca.crt \
+                        --tlsCertificateKeyFile /etc/mongodb-ssl/admin-client.pem \
+                        --authenticationDatabase '$external' \
+                        --authenticationMechanism MONGODB-X509 \
+                        --eval "db.adminCommand('ping')" > /dev/null 2>&1; do
+            echo "MongoDB 연결 대기 중... (5초 후 재시도)"
+            sleep 5
+          done
+          
+          echo "✅ MongoDB 연결 성공 - 사용자 설정 시작"
+          
+          # 사용자 설정 스크립트 실행
+          mongosh --host mongodb-sharded-mongos.percona-mongodb.svc.cluster.local:27017 \
+                  --tls \
+                  --tlsCAFile /etc/mongodb-ssl/ca.crt \
+                  --tlsCertificateKeyFile /etc/mongodb-ssl/admin-client.pem \
+                  --authenticationDatabase '$external' \
+                  --authenticationMechanism MONGODB-X509 \
+                  /scripts/setup-users.js
+        env:
+        - name: MONGODB_DATABASE_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-sharded-users
+              key: MONGODB_DATABASE_ADMIN_PASSWORD
+        - name: MONGODB_CLUSTER_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-sharded-users
+              key: MONGODB_CLUSTER_ADMIN_PASSWORD
+        - name: MONGODB_BACKUP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-sharded-users
+              key: MONGODB_BACKUP_PASSWORD
+        - name: MONGODB_CLUSTER_MONITOR_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-sharded-users
+              key: MONGODB_CLUSTER_MONITOR_PASSWORD
+        - name: MONGODB_APPLICATION_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-sharded-users
+              key: MONGODB_APPLICATION_PASSWORD
+        - name: MONGODB_READONLY_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-sharded-users
+              key: MONGODB_READONLY_PASSWORD
+        volumeMounts:
+        - name: user-setup-script
+          mountPath: /scripts
+        - name: ssl-certs
+          mountPath: /etc/mongodb-ssl
+          readOnly: true
+      volumes:
+      - name: user-setup-script
+        configMap:
+          name: mongodb-user-setup
+      - name: ssl-certs
+        projected:
+          sources:
+          - secret:
+              name: mongodb-ca-cert
+              items:
+              - key: ca.crt
+                path: ca.crt
+          - secret:
+              name: mongodb-admin-client
+              items:
+              - key: tls.crt
+                path: admin-client-cert.pem
+              - key: tls.key
+                path: admin-client-key.pem
+          - configMap:
+              name: ssl-cert-combiner
+              items:
+              - key: combine.sh
+                path: combine.sh
+                mode: 0755
+      initContainers:
+      - name: combine-certs
+        image: busybox
+        command: ["/bin/sh", "/etc/mongodb-ssl/combine.sh"]
+        volumeMounts:
+        - name: ssl-certs
+          mountPath: /etc/mongodb-ssl
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ssl-cert-combiner
+  namespace: percona-mongodb
+data:
+  combine.sh: |
+    #!/bin/sh
+    # 클라이언트 인증서와 키를 결합
+    cat /etc/mongodb-ssl/admin-client-key.pem /etc/mongodb-ssl/admin-client-cert.pem > /etc/mongodb-ssl/admin-client.pem
+    chmod 600 /etc/mongodb-ssl/admin-client.pem

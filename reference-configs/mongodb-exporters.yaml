@@ -1,0 +1,370 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongodb-exporter-mongos-x509
+  namespace: percona-mongodb
+  labels:
+    app: mongodb-exporter
+    component: mongos
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb-exporter
+      component: mongos
+  template:
+    metadata:
+      labels:
+        app: mongodb-exporter
+        component: mongos
+    spec:
+      serviceAccountName: mongodb-exporter
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: mongodb-exporter
+        image: percona/mongodb_exporter:0.40.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9216
+          name: metrics
+        env:
+        # X.509 인증 설정
+        - name: MONGODB_URI
+          value: "mongodb://mongodb-sharded-mongos.percona-mongodb.svc.cluster.local:27017/?tls=true&tlsCAFile=/etc/mongodb-ssl/ca.crt&tlsCertificateKeyFile=/etc/mongodb-ssl/monitor-client.pem&authSource=$external&authMechanism=MONGODB-X509"
+        # Exporter 설정
+        - name: MONGODB_EXPORTER_WEB_LISTEN_ADDRESS
+          value: ":9216"
+        - name: MONGODB_EXPORTER_LOG_LEVEL
+          value: "info"
+        args:
+        - "--collect-all"
+        - "--collector.collstats-limit=0"
+        - "--no-discovering-mode"
+        - "--compatible-mode"
+        - "--web.listen-address=:9216"
+        resources:
+          requests:
+            cpu: 300m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1001
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: ssl-certs
+          mountPath: /etc/mongodb-ssl
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 9216
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: 9216
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: ssl-certs
+        projected:
+          sources:
+          - secret:
+              name: mongodb-ca-cert
+              items:
+              - key: ca.crt
+                path: ca.crt
+          - secret:
+              name: mongodb-monitor-client
+              items:
+              - key: tls.crt
+                path: monitor-client-cert.pem
+              - key: tls.key
+                path: monitor-client-key.pem
+      - name: tmp
+        emptyDir: {}
+      initContainers:
+      - name: combine-certs
+        image: busybox
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          cat /etc/mongodb-ssl/monitor-client-key.pem /etc/mongodb-ssl/monitor-client-cert.pem > /tmp/monitor-client.pem
+          cp /tmp/monitor-client.pem /etc/mongodb-ssl/monitor-client.pem
+          chmod 600 /etc/mongodb-ssl/monitor-client.pem
+        volumeMounts:
+        - name: ssl-certs
+          mountPath: /etc/mongodb-ssl
+        - name: tmp
+          mountPath: /tmp
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongodb-exporter-rs0-x509
+  namespace: percona-mongodb
+  labels:
+    app: mongodb-exporter
+    component: rs0
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb-exporter
+      component: rs0
+  template:
+    metadata:
+      labels:
+        app: mongodb-exporter
+        component: rs0
+    spec:
+      serviceAccountName: mongodb-exporter
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: mongodb-exporter
+        image: percona/mongodb_exporter:0.40.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9216
+          name: metrics
+        env:
+        # X.509 인증 설정 - rs0 Primary에 연결
+        - name: MONGODB_URI
+          value: "mongodb://mongodb-sharded-rs0.percona-mongodb.svc.cluster.local:27017/?tls=true&tlsCAFile=/etc/mongodb-ssl/ca.crt&tlsCertificateKeyFile=/etc/mongodb-ssl/monitor-client.pem&authSource=$external&authMechanism=MONGODB-X509"
+        args:
+        - "--collect-all"
+        - "--collector.collstats-limit=0"
+        - "--no-discovering-mode"
+        - "--compatible-mode"
+        - "--web.listen-address=:9216"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1001
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: ssl-certs
+          mountPath: /etc/mongodb-ssl
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: ssl-certs
+        projected:
+          sources:
+          - secret:
+              name: mongodb-ca-cert
+              items:
+              - key: ca.crt
+                path: ca.crt
+          - secret:
+              name: mongodb-monitor-client
+              items:
+              - key: tls.crt
+                path: monitor-client-cert.pem
+              - key: tls.key
+                path: monitor-client-key.pem
+      - name: tmp
+        emptyDir: {}
+      initContainers:
+      - name: combine-certs
+        image: busybox
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          cat /etc/mongodb-ssl/monitor-client-key.pem /etc/mongodb-ssl/monitor-client-cert.pem > /tmp/monitor-client.pem
+          cp /tmp/monitor-client.pem /etc/mongodb-ssl/monitor-client.pem
+          chmod 600 /etc/mongodb-ssl/monitor-client.pem
+        volumeMounts:
+        - name: ssl-certs
+          mountPath: /etc/mongodb-ssl
+        - name: tmp
+          mountPath: /tmp
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongodb-exporter-rs1-x509
+  namespace: percona-mongodb
+  labels:
+    app: mongodb-exporter
+    component: rs1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb-exporter
+      component: rs1
+  template:
+    metadata:
+      labels:
+        app: mongodb-exporter
+        component: rs1
+    spec:
+      serviceAccountName: mongodb-exporter
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: mongodb-exporter
+        image: percona/mongodb_exporter:0.40.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9216
+          name: metrics
+        env:
+        # X.509 인증 설정 - rs1 Primary에 연결
+        - name: MONGODB_URI
+          value: "mongodb://mongodb-sharded-rs1.percona-mongodb.svc.cluster.local:27017/?tls=true&tlsCAFile=/etc/mongodb-ssl/ca.crt&tlsCertificateKeyFile=/etc/mongodb-ssl/monitor-client.pem&authSource=$external&authMechanism=MONGODB-X509"
+        args:
+        - "--collect-all"
+        - "--collector.collstats-limit=0"
+        - "--no-discovering-mode"
+        - "--compatible-mode"
+        - "--web.listen-address=:9216"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1001
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: ssl-certs
+          mountPath: /etc/mongodb-ssl
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: ssl-certs
+        projected:
+          sources:
+          - secret:
+              name: mongodb-ca-cert
+              items:
+              - key: ca.crt
+                path: ca.crt
+          - secret:
+              name: mongodb-monitor-client
+              items:
+              - key: tls.crt
+                path: monitor-client-cert.pem
+              - key: tls.key
+                path: monitor-client-key.pem
+      - name: tmp
+        emptyDir: {}
+      initContainers:
+      - name: combine-certs
+        image: busybox
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          cat /etc/mongodb-ssl/monitor-client-key.pem /etc/mongodb-ssl/monitor-client-cert.pem > /tmp/monitor-client.pem
+          cp /tmp/monitor-client.pem /etc/mongodb-ssl/monitor-client.pem
+          chmod 600 /etc/mongodb-ssl/monitor-client.pem
+        volumeMounts:
+        - name: ssl-certs
+          mountPath: /etc/mongodb-ssl
+        - name: tmp
+          mountPath: /tmp
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-exporter-mongos
+  namespace: percona-mongodb
+  labels:
+    app: mongodb-exporter
+    component: mongos
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9216
+    targetPort: 9216
+    name: metrics
+  selector:
+    app: mongodb-exporter
+    component: mongos
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-exporter-rs0
+  namespace: percona-mongodb
+  labels:
+    app: mongodb-exporter
+    component: rs0
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9216
+    targetPort: 9216
+    name: metrics
+  selector:
+    app: mongodb-exporter
+    component: rs0
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-exporter-rs1
+  namespace: percona-mongodb
+  labels:
+    app: mongodb-exporter
+    component: rs1
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9216
+    targetPort: 9216
+    name: metrics
+  selector:
+    app: mongodb-exporter
+    component: rs1
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mongodb-exporter
+  namespace: percona-mongodb

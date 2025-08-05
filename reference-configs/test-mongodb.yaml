@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-mongodb
+  namespace: observability
+  labels:
+    app: test-mongodb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-mongodb
+  template:
+    metadata:
+      labels:
+        app: test-mongodb
+    spec:
+      containers:
+      - name: mongodb
+        image: mongo:6.0
+        ports:
+        - containerPort: 27017
+        env:
+        - name: MONGO_INITDB_ROOT_USERNAME
+          value: "test"
+        - name: MONGO_INITDB_ROOT_PASSWORD
+          value: "test"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-mongodb
+  namespace: observability
+  labels:
+    app: test-mongodb
+spec:
+  selector:
+    app: test-mongodb
+  ports:
+  - port: 27017
+    targetPort: 27017
+  type: ClusterIP

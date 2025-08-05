@@ -1,0 +1,99 @@
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Kubernetes secrets and sensitive data
+*secret*.yaml
+*password*.yaml
+*credentials*.yaml
+*.key
+*.crt
+*.pem
+
+# Helm
+*.tgz
+charts/*.tgz
+requirements.lock
+
+# AWS credentials
+.aws/
+aws-credentials.json
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Node modules (if any)
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
+# Temporary configuration files
+*-temp.yaml
+*-tmp.yaml
+*-backup.yaml
+
+# Generated certificates
+certs/
+certificates/
+ssl/
+
+# Local development overrides
+values-local.yaml
+config-local.yaml
+
+# Terraform (if used)
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# CloudFormation outputs
+stack-outputs.json
+cf-outputs.json

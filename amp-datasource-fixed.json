@@ -1,0 +1,13 @@
+{
+  "name": "Amazon Managed Prometheus",
+  "type": "prometheus",
+  "url": "https://aps-workspaces.${AWS_REGION}.amazonaws.com/workspaces/${AMP_WORKSPACE_ID}/",
+  "access": "proxy",
+  "isDefault": true,
+  "jsonData": {
+    "httpMethod": "POST",
+    "sigV4Auth": true,
+    "sigV4AuthType": "default",
+    "sigV4Region": "${AWS_REGION}"
+  }
+}

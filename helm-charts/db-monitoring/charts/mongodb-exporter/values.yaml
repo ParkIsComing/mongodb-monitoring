@@ -1,0 +1,83 @@
+# MongoDB Exporter configuration
+image:
+  repository: percona/mongodb_exporter
+  tag: "0.40.0"
+  pullPolicy: IfNotPresent
+
+# MongoDB connection settings
+mongodb:
+  uri: ""
+  # Example: mongodb://username:password@mongodb-service:27017/admin
+  # For replica set: mongodb://username:password@mongodb-0:27017,mongodb-1:27017,mongodb-2:27017/admin?replicaSet=rs0
+  
+  # Authentication
+  username: ""
+  password: ""
+  authDatabase: "admin"
+  
+  # SSL/TLS settings
+  ssl:
+    enabled: false
+    caFile: ""
+    certFile: ""
+    keyFile: ""
+    insecureSkipVerify: false
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 9216
+  targetPort: 9216
+  annotations: {}
+
+# Deployment configuration
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+# Node selector, tolerations, and affinity
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  fsGroup: 65534
+
+# Pod annotations
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9216"
+  prometheus.io/path: "/metrics"
+
+# Exporter configuration
+exporter:
+  # Metrics collection settings
+  collectAll: true
+  collectDatabase: true
+  collectCollection: true
+  collectTopMetrics: true
+  collectIndexUsage: true
+  collectConnPoolStats: true
+  
+  # Log level
+  logLevel: "info"
+  
+  # Additional command line arguments
+  extraArgs: []
+
+# ServiceMonitor for Prometheus Operator
+serviceMonitor:
+  enabled: false
+  namespace: ""
+  labels: {}
+  interval: 30s
+  scrapeTimeout: 10s

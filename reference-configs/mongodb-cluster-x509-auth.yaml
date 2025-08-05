@@ -1,0 +1,328 @@
+apiVersion: psmdb.percona.com/v1
+kind: PerconaServerMongoDB
+metadata:
+  name: mongodb-sharded
+  namespace: percona-mongodb
+  labels:
+    app: mongodb-cluster
+spec:
+  crVersion: "1.15.0"
+  image: "percona/percona-server-mongodb:6.0.9-7"
+  imagePullPolicy: Always
+
+  # 보안 설정 강화
+  allowUnsafeConfigurations: false
+  
+  # 샤드 클러스터 활성화
+  sharding:
+    enabled: true
+    
+    # Config Server 설정 - X.509 인증 활성화
+    configsvrReplSet:
+      size: 3
+      configuration: |
+        systemLog:
+          verbosity: 1
+          component:
+            accessControl:
+              verbosity: 2
+        storage:
+          wiredTiger:
+            engineConfig:
+              cacheSizeGB: 0.25
+        net:
+          # TLS/SSL 설정
+          tls:
+            mode: requireTLS
+            certificateKeyFile: /etc/mongodb-ssl/server.pem
+            CAFile: /etc/mongodb-ssl/ca.crt
+            allowConnectionsWithoutCertificates: false
+            allowInvalidCertificates: false
+            allowInvalidHostnames: false
+          # 내부 통신만 허용
+          bindIpAll: false
+          bindIp: "0.0.0.0"
+        security:
+          # 인증 활성화
+          authorization: enabled
+          # X.509 인증 메커니즘 우선 사용
+          authenticationMechanisms: MONGODB-X509,SCRAM-SHA-1,SCRAM-SHA-256
+          # 클러스터 인증도 X.509 사용
+          clusterAuthMode: x509
+        # 감사 로그 활성화
+        auditLog:
+          destination: file
+          format: JSON
+          path: /var/log/mongodb/audit.log
+      resources:
+        limits:
+          cpu: 300m
+          memory: 0.5G
+        requests:
+          cpu: 300m
+          memory: 0.5G
+      volumeSpec:
+        persistentVolumeClaim:
+          storageClassName: gp3-mongodb-encrypted
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 3Gi
+      # 외부 노출 비활성화
+      expose:
+        enabled: false
+      # TLS 인증서 볼륨 마운트
+      sidecars:
+      - image: busybox
+        command: ["/bin/sh"]
+        args: ["-c", "while true; do sleep 30; done;"]
+        name: ssl-cert-loader
+        volumeMounts:
+        - name: ssl-secret
+          mountPath: /etc/mongodb-ssl
+          readOnly: true
+        - name: ssl-internal
+          mountPath: /etc/mongodb-ssl-internal
+          readOnly: true
+      # 보안 컨텍스트
+      podSecurityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containerSecurityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: false  # MongoDB 로그 쓰기 위해 false
+        runAsNonRoot: true
+        runAsUser: 1001
+        capabilities:
+          drop:
+          - ALL
+    
+    # Mongos 설정 - X.509 인증 활성화
+    mongos:
+      size: 2
+      configuration: |
+        systemLog:
+          verbosity: 1
+          component:
+            accessControl:
+              verbosity: 2
+        net:
+          # TLS/SSL 설정
+          tls:
+            mode: requireTLS
+            certificateKeyFile: /etc/mongodb-ssl/server.pem
+            CAFile: /etc/mongodb-ssl/ca.crt
+            allowConnectionsWithoutCertificates: false
+            allowInvalidCertificates: false
+            allowInvalidHostnames: false
+          # 클러스터 내부에서만 접근
+          bindIpAll: false
+          bindIp: "0.0.0.0"
+        security:
+          # 인증 활성화
+          authorization: enabled
+          # X.509 인증 메커니즘 우선 사용
+          authenticationMechanisms: MONGODB-X509,SCRAM-SHA-1,SCRAM-SHA-256
+          # 클러스터 인증도 X.509 사용
+          clusterAuthMode: x509
+        # 감사 로그 활성화
+        auditLog:
+          destination: file
+          format: JSON
+          path: /var/log/mongodb/audit.log
+      resources:
+        limits:
+          cpu: 300m
+          memory: 0.5G
+        requests:
+          cpu: 300m
+          memory: 0.5G
+      # 외부 노출 비활성화
+      expose:
+        enabled: false
+      # 보안 컨텍스트
+      podSecurityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containerSecurityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: false
+        runAsNonRoot: true
+        runAsUser: 1001
+        capabilities:
+          drop:
+          - ALL
+  
+  # 샤드 설정 - X.509 인증 활성화
+  replsets:
+    - name: "rs0"
+      size: 3
+      configuration: |
+        systemLog:
+          verbosity: 1
+          component:
+            accessControl:
+              verbosity: 2
+        storage:
+          wiredTiger:
+            engineConfig:
+              cacheSizeGB: 0.25
+        net:
+          # TLS/SSL 설정
+          tls:
+            mode: requireTLS
+            certificateKeyFile: /etc/mongodb-ssl/server.pem
+            CAFile: /etc/mongodb-ssl/ca.crt
+            allowConnectionsWithoutCertificates: false
+            allowInvalidCertificates: false
+            allowInvalidHostnames: false
+          # 내부 통신만 허용
+          bindIpAll: false
+          bindIp: "0.0.0.0"
+        security:
+          # 인증 활성화
+          authorization: enabled
+          # X.509 인증 메커니즘 우선 사용
+          authenticationMechanisms: MONGODB-X509,SCRAM-SHA-1,SCRAM-SHA-256
+          # 클러스터 인증도 X.509 사용
+          clusterAuthMode: x509
+        # 감사 로그 활성화
+        auditLog:
+          destination: file
+          format: JSON
+          path: /var/log/mongodb/audit.log
+      resources:
+        limits:
+          cpu: 500m
+          memory: 1G
+        requests:
+          cpu: 500m
+          memory: 1G
+      volumeSpec:
+        persistentVolumeClaim:
+          storageClassName: gp3-mongodb-encrypted
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+      # 외부 노출 비활성화
+      expose:
+        enabled: false
+      # 보안 컨텍스트
+      podSecurityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containerSecurityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: false
+        runAsNonRoot: true
+        runAsUser: 1001
+        capabilities:
+          drop:
+          - ALL
+    
+    - name: "rs1"
+      size: 3
+      configuration: |
+        systemLog:
+          verbosity: 1
+          component:
+            accessControl:
+              verbosity: 2
+        storage:
+          wiredTiger:
+            engineConfig:
+              cacheSizeGB: 0.25
+        net:
+          # TLS/SSL 설정
+          tls:
+            mode: requireTLS
+            certificateKeyFile: /etc/mongodb-ssl/server.pem
+            CAFile: /etc/mongodb-ssl/ca.crt
+            allowConnectionsWithoutCertificates: false
+            allowInvalidCertificates: false
+            allowInvalidHostnames: false
+          # 내부 통신만 허용
+          bindIpAll: false
+          bindIp: "0.0.0.0"
+        security:
+          # 인증 활성화
+          authorization: enabled
+          # X.509 인증 메커니즘 우선 사용
+          authenticationMechanisms: MONGODB-X509,SCRAM-SHA-1,SCRAM-SHA-256
+          # 클러스터 인증도 X.509 사용
+          clusterAuthMode: x509
+        # 감사 로그 활성화
+        auditLog:
+          destination: file
+          format: JSON
+          path: /var/log/mongodb/audit.log
+      resources:
+        limits:
+          cpu: 500m
+          memory: 1G
+        requests:
+          cpu: 500m
+          memory: 1G
+      volumeSpec:
+        persistentVolumeClaim:
+          storageClassName: gp3-mongodb-encrypted
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+      # 외부 노출 비활성화
+      expose:
+        enabled: false
+      # 보안 컨텍스트
+      podSecurityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containerSecurityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: false
+        runAsNonRoot: true
+        runAsUser: 1001
+        capabilities:
+          drop:
+          - ALL
+  
+  # 보안 설정
+  secrets:
+    users: mongodb-sharded-users
+    ssl: mongodb-server-tls
+    sslInternal: mongodb-server-tls
+  
+  # TLS 설정 활성화
+  tls:
+    # 내부 통신 TLS 강제
+    sslInternal: true
+    # 클라이언트 연결 TLS 강제
+    sslClient: true
+  
+  # 백업 설정 (TLS 사용)
+  backup:
+    enabled: true
+    image: percona/percona-backup-mongodb:2.3.0
+    storages:
+      s3-encrypted:
+        type: s3
+        s3:
+          bucket: mongodb-backup-encrypted
+          credentialsSecret: backup-s3-credentials
+          region: us-east-1
+          prefix: mongodb-backups
+          serverSideEncryption: AES256
+    
+    # 주기적 백업 스케줄
+    tasks:
+      - name: daily-backup
+        enabled: true
+        schedule: "0 2 * * *"
+        keep: 7
+        storageName: s3-encrypted
+        compressionType: gzip

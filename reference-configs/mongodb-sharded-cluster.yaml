@@ -1,0 +1,141 @@
+# mongodb-sharded-cluster.yaml
+apiVersion: psmdb.percona.com/v1
+kind: PerconaServerMongoDB
+metadata:
+  name: mongodb-sharded
+  namespace: percona-mongodb
+spec:
+  crVersion: "1.15.0"
+  image: "percona/percona-server-mongodb:6.0.9-7"
+  imagePullPolicy: Always
+
+  allowUnsafeConfigurations: false
+  
+  # 샤드 클러스터 활성화
+  sharding:
+    enabled: true
+    
+    # Config Server 설정
+    configsvrReplSet:
+      size: 3
+      configuration: |
+        systemLog:
+          verbosity: 1
+        storage:
+          wiredTiger:
+            engineConfig:
+              cacheSizeGB: 0.25
+      resources:
+        limits:
+          cpu: 300m
+          memory: 0.5G
+        requests:
+          cpu: 300m
+          memory: 0.5G
+      volumeSpec:
+        persistentVolumeClaim:
+          storageClassName: gp3-mongodb
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 3Gi
+      expose:
+        enabled: false
+    
+    # Mongos 설정
+    mongos:
+      size: 2
+      configuration: |
+        systemLog:
+          verbosity: 1
+      resources:
+        limits:
+          cpu: 300m
+          memory: 0.5G
+        requests:
+          cpu: 300m
+          memory: 0.5G
+      expose:
+        enabled: false
+  
+  # 샤드 설정
+  replsets:
+    - name: "rs0"
+      size: 3
+      configuration: |
+        systemLog:
+          verbosity: 1
+        storage:
+          wiredTiger:
+            engineConfig:
+              cacheSizeGB: 0.25
+      resources:
+        limits:
+          cpu: 500m
+          memory: 1G
+        requests:
+          cpu: 500m
+          memory: 1G
+      volumeSpec:
+        persistentVolumeClaim:
+          storageClassName: gp3-mongodb
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+      expose:
+        enabled: false
+    
+    - name: "rs1"
+      size: 3
+      configuration: |
+        systemLog:
+          verbosity: 1
+        storage:
+          wiredTiger:
+            engineConfig:
+              cacheSizeGB: 0.25
+      resources:
+        limits:
+          cpu: 500m
+          memory: 1G
+        requests:
+          cpu: 500m
+          memory: 1G
+      volumeSpec:
+        persistentVolumeClaim:
+          storageClassName: gp3-mongodb
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+      expose:
+        enabled: false
+  
+  # 보안 설정
+  secrets:
+    users: mongodb-sharded-secrets
+    ssl: mongodb-sharded-ssl
+    sslInternal: mongodb-sharded-ssl-internal
+  
+  # 백업 설정
+  backup:
+    enabled: true
+    image: percona/percona-backup-mongodb:2.3.0
+    storages:
+      s3-us-west:
+        type: s3
+        s3:
+          bucket: your-backup-bucket
+          credentialsSecret: backup-s3-credentials
+          region: us-east-1
+          prefix: mongodb-backups
+    
+    # 주기적 백업 스케줄
+    tasks:
+      - name: daily-backup
+        enabled: true
+        schedule: "0 2 * * *"
+        keep: 3
+        storageName: s3-us-west
+        compressionType: gzip

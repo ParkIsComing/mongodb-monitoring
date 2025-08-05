@@ -1,0 +1,332 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  EKS Stack for Aurora EKS AMP Monitoring
+  This template creates an EKS cluster with managed node groups and required IAM roles.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: aurora-eks-amp-monitoring
+    Description: Environment name used for resource naming and tagging
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID where EKS cluster will be created
+
+  PrivateSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of private subnet IDs for EKS nodes
+
+  NodeInstanceType:
+    Type: String
+    Default: m5.xlarge
+    Description: EC2 instance type for the EKS nodes
+
+  NodeGroupDesiredSize:
+    Type: Number
+    Default: 3
+    Description: Desired number of nodes in the EKS node group
+
+  NodeGroupMinSize:
+    Type: Number
+    Default: 3
+    Description: Minimum number of nodes in the EKS node group
+
+  NodeGroupMaxSize:
+    Type: Number
+    Default: 3
+    Description: Maximum number of nodes in the EKS node group
+
+Resources:
+  ##############################################################################
+  # EKS Cluster Role
+  ##############################################################################
+  EksClusterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: eks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-eks-cluster-role
+
+  ##############################################################################
+  # EKS Node Group Role
+  ##############################################################################
+  EksNodeGroupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-eks-node-group-role
+
+  ##############################################################################
+  # EKS Cluster
+  ##############################################################################
+  EksCluster:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Sub ${EnvironmentName}-eks
+      Version: '1.28'
+      RoleArn: !GetAtt EksClusterRole.Arn
+      ResourcesVpcConfig:
+        SubnetIds: !Ref PrivateSubnets
+        SecurityGroupIds:
+          - !Ref EksClusterSecurityGroup
+        EndpointPrivateAccess: false
+        EndpointPublicAccess: true
+        PublicAccessCidrs:
+          - 0.0.0.0/0
+      Logging:
+        ClusterLogging:
+          EnabledTypes:
+            - Type: api
+            - Type: audit
+            - Type: authenticator
+            - Type: controllerManager
+            - Type: scheduler
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-eks
+
+  ##############################################################################
+  # EKS Node Group
+  ##############################################################################
+  EksNodeGroup:
+    Type: AWS::EKS::Nodegroup
+    DependsOn: EksCluster
+    Properties:
+      ClusterName: !Ref EksCluster
+      NodegroupName: !Sub ${EnvironmentName}-node-group
+      NodeRole: !GetAtt EksNodeGroupRole.Arn
+      Subnets: !Ref PrivateSubnets
+      InstanceTypes:
+        - !Ref NodeInstanceType
+      ScalingConfig:
+        DesiredSize: !Ref NodeGroupDesiredSize
+        MaxSize: !Ref NodeGroupMaxSize
+        MinSize: !Ref NodeGroupMinSize
+      UpdateConfig:
+        MaxUnavailable: 1
+      AmiType: AL2_x86_64
+      CapacityType: ON_DEMAND
+      DiskSize: 20
+      Tags:
+        Name: !Sub ${EnvironmentName}-node-group
+
+  ##############################################################################
+  # Security Groups
+  ##############################################################################
+  EksClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for EKS cluster
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.0.0.0/16
+          Description: HTTPS access from VPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-eks-cluster-sg
+
+  EksNodeSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for EKS nodes
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 1025
+          ToPort: 65535
+          SourceSecurityGroupId: !Ref EksClusterSecurityGroup
+          Description: Allow pods to communicate with the cluster API Server
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref EksClusterSecurityGroup
+          Description: Allow pods running extension API servers on port 443
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-eks-node-sg
+
+  EksNodeSecurityGroupSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref EksNodeSecurityGroup
+      IpProtocol: -1
+      SourceSecurityGroupId: !Ref EksNodeSecurityGroup
+      Description: Allow node to communicate with each other
+
+  ##############################################################################
+  # EBS CSI Driver Role (Fixed)
+  ##############################################################################
+  EbsCsiDriverRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/${EksCluster.OpenIdConnectIssuerUrl}
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "${EksCluster.OpenIdConnectIssuerUrl}:sub": "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+                "${EksCluster.OpenIdConnectIssuerUrl}:aud": "sts.amazonaws.com"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy
+
+  ##############################################################################
+  # Load Balancer Controller Role (Fixed)
+  ##############################################################################
+  LoadBalancerControllerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/${EksCluster.OpenIdConnectIssuerUrl}
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "${EksCluster.OpenIdConnectIssuerUrl}:sub": "system:serviceaccount:kube-system:aws-load-balancer-controller"
+                "${EksCluster.OpenIdConnectIssuerUrl}:aud": "sts.amazonaws.com"
+      ManagedPolicyArns:
+        - !Ref LoadBalancerControllerPolicy
+
+  ##############################################################################
+  # Load Balancer Controller Policy
+  ##############################################################################
+  LoadBalancerControllerPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - iam:CreateServiceLinkedRole
+              - ec2:DescribeAccountAttributes
+              - ec2:DescribeAddresses
+              - ec2:DescribeAvailabilityZones
+              - ec2:DescribeInternetGateways
+              - ec2:DescribeVpcs
+              - ec2:DescribeSubnets
+              - ec2:DescribeSecurityGroups
+              - ec2:DescribeInstances
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DescribeTags
+              - ec2:GetCoipPoolUsage
+              - ec2:DescribeCoipPools
+              - elasticloadbalancing:DescribeLoadBalancers
+              - elasticloadbalancing:DescribeLoadBalancerAttributes
+              - elasticloadbalancing:DescribeListeners
+              - elasticloadbalancing:DescribeListenerCertificates
+              - elasticloadbalancing:DescribeSSLPolicies
+              - elasticloadbalancing:DescribeRules
+              - elasticloadbalancing:DescribeTargetGroups
+              - elasticloadbalancing:DescribeTargetGroupAttributes
+              - elasticloadbalancing:DescribeTargetHealth
+              - elasticloadbalancing:DescribeTags
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - cognito-idp:DescribeUserPoolClient
+              - acm:ListCertificates
+              - acm:DescribeCertificate
+              - iam:ListServerCertificates
+              - iam:GetServerCertificate
+              - waf-regional:GetWebACL
+              - waf-regional:GetWebACLForResource
+              - waf-regional:AssociateWebACL
+              - waf-regional:DisassociateWebACL
+              - wafv2:GetWebACL
+              - wafv2:GetWebACLForResource
+              - wafv2:AssociateWebACL
+              - wafv2:DisassociateWebACL
+              - shield:DescribeProtection
+              - shield:GetSubscriptionState
+              - shield:DescribeSubscription
+              - shield:CreateProtection
+              - shield:DeleteProtection
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - ec2:CreateSecurityGroup
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - ec2:CreateTags
+            Resource: arn:aws:ec2:*:*:security-group/*
+            Condition:
+              StringEquals:
+                "ec2:CreateAction": "CreateSecurityGroup"
+              "Null":
+                "aws:RequestTag/elbv2.k8s.aws/cluster": "false"
+
+Outputs:
+  ClusterName:
+    Description: The name of the EKS cluster
+    Value: !Ref EksCluster
+    Export:
+      Name: !Sub ${AWS::StackName}-ClusterName
+
+  ClusterArn:
+    Description: The ARN of the EKS cluster
+    Value: !GetAtt EksCluster.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-ClusterArn
+
+  ClusterEndpoint:
+    Description: The endpoint of the EKS cluster
+    Value: !GetAtt EksCluster.Endpoint
+    Export:
+      Name: !Sub ${AWS::StackName}-ClusterEndpoint
+
+  OIDCProviderUrl:
+    Description: The URL of the OIDC Provider
+    Value: !GetAtt EksCluster.OpenIdConnectIssuerUrl
+    Export:
+      Name: !Sub ${AWS::StackName}-OIDCProviderUrl
+
+  EbsCsiDriverRoleArn:
+    Description: The ARN of the IAM role for EBS CSI Driver
+    Value: !GetAtt EbsCsiDriverRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-EbsCsiDriverRoleArn
+
+  LoadBalancerControllerRoleArn:
+    Description: The ARN of the IAM role for AWS Load Balancer Controller
+    Value: !GetAtt LoadBalancerControllerRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-LoadBalancerControllerRoleArn

@@ -1,0 +1,12 @@
+apiVersion: v2
+name: mongodb-exporter
+description: Prometheus MongoDB Exporter for database metrics collection
+type: application
+version: 1.0.0
+appVersion: "0.40.0"
+keywords:
+  - mongodb
+  - prometheus
+  - exporter
+  - monitoring
+  - database
