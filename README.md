@@ -58,7 +58,7 @@ export PRIVATE_SUBNETS=$(aws cloudformation describe-stacks \
 # EKS 클러스터 생성
 aws cloudformation create-stack \
   --stack-name ${WORKSHOP_NAME}-eks \
-  --template-body file://CloudFormation\ Templates/eks-stack-fixed.yaml \
+  --template-body file://cloudformation-templates/eks-stack-fixed.yaml \
   --parameters \
     ParameterKey=EnvironmentName,ParameterValue=${WORKSHOP_NAME} \
     ParameterKey=VpcId,ParameterValue=${VPC_ID} \
